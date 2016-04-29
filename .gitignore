@@ -1,6 +1,7 @@
 *.iml
 .gradle
 gradlew.bat
+Constants.java
 /local.properties
 /.idea/workspace.xml
 /.idea/libraries
