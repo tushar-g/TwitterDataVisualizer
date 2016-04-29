@@ -31,9 +31,11 @@ import com.google.android.gms.maps.MapFragment;
 import com.google.android.gms.maps.OnMapReadyCallback;
 import com.google.android.gms.maps.model.BitmapDescriptorFactory;
 import com.google.android.gms.maps.model.LatLng;
+import com.google.android.gms.maps.model.Marker;
 import com.google.android.gms.maps.model.MarkerOptions;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.Timer;
 import java.util.TimerTask;
 
@@ -56,7 +58,6 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
 
     private static final int REQUEST_LOCATION_CHECK_SETTINGS = 0x1;
     private static final String LOG_TAG = "MainActivity";
-    private static final int REQUEST_PERMISSION_LOCATION = 1001;
     private static final long TIMER_INTERVAL = 20000; // Every 20 seconds
 
     GoogleMap mGoogleMap;
@@ -70,6 +71,9 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
     boolean mapIsReady;
     private boolean markersAddedOnMap;
     private volatile boolean isBusy;
+    long sinceId = -1l;
+
+    LinkedHashMap<String, StatusWithMarker> data = new LinkedHashMap<>();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -101,13 +105,15 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
 
     @Override
     protected void onStop() {
-        mGoogleApiClient.disconnect();
         Log.d(LOG_TAG, "onStop called");
+        mGoogleApiClient.disconnect();
+        handler.removeCallbacks(runnable);
         if (mGoogleMap != null)
             mGoogleMap.clear();
-        handler.removeCallbacks(runnable);
-        timer.cancel();
-        timer.purge();
+        if (timer != null) {
+            timer.purge();
+            timer.cancel();
+        }
         super.onStop();
     }
 
@@ -228,7 +234,7 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
         @Override
         public void run() {
             if (!isBusy) {
-                new GetTweetsTask().execute();
+                new GetTweetsTask().execute(sinceId);
             }
         }
     };
@@ -314,7 +320,7 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
         }
     }
 
-    private class GetTweetsTask extends AsyncTask<Void, Void, ArrayList<twitter4j.Status>> {
+    private class GetTweetsTask extends AsyncTask<Long, Void, ArrayList<twitter4j.Status>> {
 
         @Override
         protected void onPreExecute() {
@@ -323,7 +329,7 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
         }
 
         @Override
-        protected ArrayList<twitter4j.Status> doInBackground(Void... params) {
+        protected ArrayList<twitter4j.Status> doInBackground(Long... params) {
             ConfigurationBuilder cb = new ConfigurationBuilder();
             cb.setApplicationOnlyAuthEnabled(true);
             cb.setOAuthConsumerKey(Constants.TWITTER_CONSUMER_KEY)
@@ -344,6 +350,7 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
                 Query query = new Query();
                 query.setGeoCode(geo, 1, Query.Unit.mi);
                 query.setCount(100);
+                query.setSinceId(params[0]);
                 QueryResult result = twitter.search(query);
                 tweets = (ArrayList<twitter4j.Status>) result.getTweets();
             } catch (TwitterException te) {
@@ -357,19 +364,32 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
             super.onPostExecute(statuses);
             if (statuses != null) {
                 Log.d(LOG_TAG, "No of tweets : " + statuses.size());
-                for (twitter4j.Status s : statuses) {
+                int size = statuses.size();
+                for (int i = size - 1; i > -1; i--) {
+                    twitter4j.Status s = statuses.get(i);
                     if (s.getGeoLocation() != null) {
-                        addMarkerToMap(s, s.getGeoLocation());
-                    } else {
-                        // If geo is null it may be a retweeted status
-                        if (s.getRetweetedStatus() != null) {
-                            if (s.getRetweetedStatus().getGeoLocation() != null) {
-                                addMarkerToMap(s, s.getRetweetedStatus().getGeoLocation());
+                        if (data.containsKey(s.getGeoLocation().toString())) {
+                            data.remove(s.getGeoLocation().toString()).mMarker.remove();
+                        }
+                        Marker m = mGoogleMap.addMarker(getNewMarker(s, s.getGeoLocation()));
+                        data.put(s.getGeoLocation().toString(), new StatusWithMarker(s, m));
+
+                        if (data.size() > 100) {
+                            Log.d(LOG_TAG, "Data size is more than 100, deleting last 10");
+                            Object[] o = data.keySet().toArray();
+                            for (int j = o.length - 1; j >= o.length - 10; j--) {
+                                data.remove((String) o[j]).mMarker.remove();
                             }
                         }
                     }
                 }
+                Log.d(LOG_TAG, "Data size is : " + data.size());
+
                 markersAddedOnMap = true;
+                if (statuses.size() != 0) {
+                    sinceId = statuses.get(0).getId();
+                }
+                Log.d(LOG_TAG, "SinceId is : " + sinceId);
             }
             isBusy = false;
         }
@@ -463,4 +483,15 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
                 .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_GREEN))
                 .title(status.getUser().getScreenName() + ": " + status.getText()));
     }
+
+    private MarkerOptions getNewMarker(twitter4j.Status status, GeoLocation gl) {
+        LatLng ll = new LatLng(gl.getLatitude(), gl.getLongitude());
+        MarkerOptions m = new MarkerOptions()
+                .position(ll)
+                .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_GREEN))
+                .title(status.getUser().getScreenName() + ": " + status.getText());
+        return m;
+
+    }
+
 }
