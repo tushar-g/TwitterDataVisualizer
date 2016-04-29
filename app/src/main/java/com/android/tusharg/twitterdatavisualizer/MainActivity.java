@@ -2,9 +2,12 @@ package com.android.tusharg.twitterdatavisualizer;
 
 import android.app.Activity;
 import android.app.ProgressDialog;
+import android.content.Context;
 import android.content.Intent;
 import android.content.IntentSender;
 import android.location.Location;
+import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
 import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.Handler;
@@ -233,11 +236,14 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
     private Runnable runnable = new Runnable() {
         @Override
         public void run() {
-            if (!isBusy) {
+            if (!isNetworkAvailable()) {
+                Toast.makeText(MainActivity.this, "No Internet Connection", Toast.LENGTH_SHORT).show();
+            } else if (!isBusy) {
                 new GetTweetsTask().execute(sinceId);
             }
         }
     };
+
     private Timer timer;
     private TimerTask tt = new TimerTask() {
         @Override
@@ -492,6 +498,13 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
                 .title(status.getUser().getScreenName() + ": " + status.getText());
         return m;
 
+    }
+
+    public boolean isNetworkAvailable() {
+        Context context = MainActivity.this;
+        ConnectivityManager connectivityManager = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
+        NetworkInfo activeNetworkInfo = connectivityManager.getActiveNetworkInfo();
+        return activeNetworkInfo != null && activeNetworkInfo.isConnected();
     }
 
 }
